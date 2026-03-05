@@ -3,22 +3,32 @@ import re
 
 BOOKS_DIR = "books"  # 书籍存放目录
 
+# 可选：每本书的简介与推荐理由，key 为书名（不含 .txt），与前端书籍详情弹层一致
+BOOK_META = {
+    "小王子": {
+        "description": "适读年龄 3～8 岁，图文并茂，支持互动阅读。",
+        "recommendReason": "推荐理由：适合培养专注力与阅读兴趣，可与脑血氧监测配合使用。",
+    },
+}
+
 
 def get_all_books():
-    """扫描目录，返回所有书籍的列表（不含内容，只含元数据）"""
+    """扫描目录，返回所有书籍的列表（含 id、title、cover、description、recommendReason）"""
     books = []
     if not os.path.exists(BOOKS_DIR):
         os.makedirs(BOOKS_DIR)
 
     for filename in os.listdir(BOOKS_DIR):
         if filename.endswith(".txt"):
-            # 使用文件名作为 ID 和 标题 (去除 .txt)
             book_id = filename
             title = filename.replace(".txt", "")
+            meta = BOOK_META.get(title, {})
             books.append({
                 "id": book_id,
                 "title": title,
-                "cover": "📘"  # 以后可以换成图片 URL
+                "cover": meta.get("cover") or "📘",
+                "description": meta.get("description") or "适读年龄 3～8 岁，图文并茂，支持互动阅读。",
+                "recommendReason": meta.get("recommendReason") or "推荐理由：适合培养专注力与阅读兴趣，可与脑血氧监测配合使用。",
             })
     return books
 

@@ -70,17 +70,20 @@ def get_session_events(session_id: int, db: Session = Depends(get_db)):
 class SessionCreate(BaseModel):
     subject_id: int
     book_title: str
+    book_id: Optional[str] = None  # 与书架列表 id 一致，如 "小王子.txt"，用于阅读历史
 
 
 @router.post("/start_session")
 def start_new_session(data: SessionCreate, db: Session = Depends(get_db)):
     """
-    前端点击“开始阅读”时调用，创建一个新的 Session
+    前端点击“开始阅读”时调用，创建一个新的 Session。
+    若传 book_id 则写入会话，供「我的阅读」历史使用；未传则用 book_title + ".txt" 推导。
     """
-    # 1. 创建会话记录
+    book_id = data.book_id if data.book_id else f"{data.book_title}.txt"
     new_session = models.ReadingSession(
-        subject_id=data.subject_id,  # 这里暂时由前端传，实际可改为固定值或登录用户
+        subject_id=data.subject_id,
         book_title=data.book_title,
+        book_id=book_id,
         start_time=datetime.now()
     )
     db.add(new_session)

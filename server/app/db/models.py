@@ -1,6 +1,6 @@
 # server/app/db/models.py
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from server.app.db.base import Base
@@ -24,6 +24,54 @@ class Subject(Base):
     sessions = relationship("ReadingSession", back_populates="subject")
 
 
+class User(Base):
+    """
+    用户表：儿童账号、家长账号、管理员账号统一存储。
+    role: CHILD / PARENT / ADMIN。
+    儿童账号的 subject_id 关联 subjects 表，用于阅读数据（reading_sessions 等）。
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(64), unique=True, index=True, nullable=False, comment="登录账号")
+    password_hash = Column(String(128), nullable=False, comment="密码哈希")
+    role = Column(String(20), nullable=False, index=True, comment="CHILD / PARENT / ADMIN")
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True, comment="仅儿童账号：关联被试/阅读数据")
+    display_name = Column(String(64), nullable=True, comment="显示名，如 小明、家长")
+    created_at = Column(DateTime, default=datetime.now)
+
+    subject = relationship("Subject", backref="user", uselist=False)
+    bound_children = relationship(
+        "ParentChildBinding",
+        foreign_keys="ParentChildBinding.parent_id",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+    )
+    bound_by_parents = relationship(
+        "ParentChildBinding",
+        foreign_keys="ParentChildBinding.child_id",
+        back_populates="child",
+        cascade="all, delete-orphan",
+    )
+
+
+class ParentChildBinding(Base):
+    """
+    家长-儿童关联表：记录哪位家长绑定了哪位儿童，绑定后可查看该儿童阅读数据。
+    """
+    __tablename__ = "parent_child_bindings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    parent_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    child_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (UniqueConstraint("parent_id", "child_id", name="uq_parent_child"),)
+
+    parent = relationship("User", foreign_keys=[parent_id], back_populates="bound_children")
+    child = relationship("User", foreign_keys=[child_id], back_populates="bound_by_parents")
+
+
 class ReadingSession(Base):
     """
     【流程控制层】阅读会话表
@@ -35,6 +83,7 @@ class ReadingSession(Base):
     id = Column(Integer, primary_key=True, index=True)
     subject_id = Column(Integer, ForeignKey("subjects.id"))
     book_title = Column(String(100), comment="阅读书目")
+    book_id = Column(String(120), nullable=True, index=True, comment="书籍ID，与书架列表 id 一致，如 小王子.txt，用于阅读历史")
 
     start_time = Column(DateTime, default=datetime.now, comment="开始时间")
     end_time = Column(DateTime, nullable=True, comment="结束时间")

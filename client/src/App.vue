@@ -1,128 +1,346 @@
 <template>
   <div class="app-container">
-    <nav class="navbar">
-      <div class="brand">
-        <span class="logo">🎓</span>
-        <span class="title">儿童认知自适应阅读系统</span>
-      </div>
-      
-      <div class="status-panel" v-if="readingStatus !== 'LIBRARY'">
-        <button class="btn-text" @click="backToLibrary">⬅ 返回书架</button>
-        <div class="divider"></div>
-        <div class="indicator">
-          <span class="label">专注度:</span>
-          <span class="value" :class="focusLevel">{{ focusText[focusLevel] }}</span>
+    <!-- 背景白噪音，音量由设置控制，后端可配置音源 -->
+    <audio ref="bgNoiseRef" loop muted playsinline></audio>
+    <!-- 登录界面 -->
+    <div v-if="!isLoggedIn" class="login-page">
+      <div class="login-card">
+        <h1 class="login-title">儿童认知自适应阅读系统</h1>
+        <p class="login-subtitle">请输入账号密码，进入对应端</p>
+
+        <div class="login-form">
+          <div class="form-item">
+            <label>账号</label>
+            <input
+              v-model="loginForm.username"
+              type="text"
+              placeholder="例如：child / parent / admin"
+            />
+          </div>
+
+          <div class="form-item">
+            <label>密码</label>
+            <input
+              v-model="loginForm.password"
+              type="password"
+              placeholder="请输入密码"
+            />
+          </div>
+
+          <button class="btn-login" @click="handleLogin">
+            登 录
+          </button>
+
+          <div class="login-tips">
+            <p>示例账号：</p>
+            <p>儿童端：child / 123456</p>
+            <p>家长端：parent / 123456</p>
+            <p>管理员端：admin / 123456</p>
+          </div>
         </div>
-        <div class="indicator">
-          <span class="label">设备:</span>
-          <span class="dot" :class="{ active: isDeviceConnected }"></span>
-          <span class="status-text">{{ isDeviceConnected ? '已连接' : '未连接' }}</span>
-        </div>
       </div>
-    </nav>
+    </div>
 
-    <main class="main-stage">
-      
-      <transition name="fade">
-        <div v-if="readingStatus === 'LIBRARY'" class="layout-full-width" key="library">
-          <div class="library-container">
-            <div class="library-header">
-              <h2>我的书架</h2>
-              <p>请选择一本喜欢的绘本开始阅读</p>
-            </div>
+    <!-- 登录后主界面 -->
+    <template v-else>
+      <nav class="navbar">
+        <div class="brand">
+          <span class="logo">🎓</span>
+          <span class="title">儿童认知自适应阅读系统</span>
+        </div>
+        
+        <div class="status-panel" v-if="readingStatus !== 'LIBRARY'">
+          <button class="btn-text" @click="backToLibrary">⬅ 返回书架</button>
+          <div class="divider"></div>
+          <div class="indicator">
+            <span class="label">专注度:</span>
+            <span class="value" :class="focusLevel">{{ focusText[focusLevel] }}</span>
+          </div>
+          <div class="indicator">
+            <span class="label">设备:</span>
+            <span class="dot" :class="{ active: isDeviceConnected }"></span>
+            <span class="status-text">{{ isDeviceConnected ? '已连接' : '未连接' }}</span>
+          </div>
+        </div>
 
-            <div v-if="isLoadingBooks" class="loading">
-              <div class="spinner"></div> 正在获取书籍列表...
-            </div>
+        <div class="user-panel">
+          <span class="user-role">
+            当前端口：
+            <span v-if="currentRole === 'CHILD'">儿童端</span>
+            <span v-else-if="currentRole === 'PARENT'">家长端</span>
+            <span v-else-if="currentRole === 'ADMIN'">管理员端</span>
+          </span>
+          <button class="btn-text" @click="logout">退出登录</button>
+        </div>
+      </nav>
 
-            <div class="book-grid">
-              <div 
-                v-for="book in bookList" 
-                :key="book.id" 
-                class="book-card" 
-                @click="selectBook(book)"
-              >
-                <div class="book-cover">
-                  <span class="book-icon">{{ book.cover || '📘' }}</span>
+      <main class="main-stage">
+        <!-- 儿童端：保留原有阅读界面 -->
+        <div v-if="currentRole === 'CHILD'" class="child-layout">
+          <transition name="fade">
+            <!-- 书架主页 -->
+            <div v-if="readingStatus === 'LIBRARY' && childView === 'LIBRARY'" class="layout-full-width" key="library">
+              <div class="library-container">
+                <div class="library-header">
+                  <h2>我的书架</h2>
+                  <p>请选择一本喜欢的绘本开始阅读</p>
                 </div>
-                <div class="book-info">
-                  <h3>{{ book.title }}</h3>
-                  <span class="tag">推荐阅读</span>
+
+                <div class="device-summary">
+                  <div class="device-status">
+                    <span class="dot" :class="{ active: isDeviceConnected }"></span>
+                    <span class="text" v-if="isDeviceConnected">设备已连接</span>
+                    <span class="text" v-else>
+                      设备未连接
+                      <button type="button" class="link-btn" @click.stop="openDeviceConnect">去连接设备</button>
+                    </span>
+                    <button v-if="isDeviceConnected" type="button" class="link-btn link-btn-subtle" @click.stop="openDeviceConnect">连接说明</button>
+                  </div>
+                  <div class="hbo-status">
+                    <span class="label">当前脑血氧 (HbO):</span>
+                    <span class="value" v-if="currentHbO !== null">{{ currentHbO.toFixed(3) }} μmol/L</span>
+                    <span class="value placeholder" v-else>--</span>
+                  </div>
+                </div>
+
+                <div v-if="isLoadingBooks" class="loading">
+                  <div class="spinner"></div> 正在获取书籍列表...
+                </div>
+
+                <div class="book-grid">
+                  <div 
+                    v-for="book in bookList" 
+                    :key="book.id" 
+                    class="book-card" 
+                    @click="openBookDetail(book)"
+                  >
+                    <div class="book-cover">
+                      <span class="book-icon">{{ book.cover || '📘' }}</span>
+                    </div>
+                    <div class="book-info">
+                      <h3>{{ book.title }}</h3>
+                      <span class="tag">推荐阅读</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      
 
-      <div v-else class="layout-split" key="reader">
+            <!-- 我的阅读：阅读记录列表 -->
+            <div v-else-if="readingStatus === 'LIBRARY' && childView === 'MY_READING'" class="layout-full-width" key="my-reading">
+              <div class="library-container my-reading-page">
+                <div class="library-header">
+                  <h2>我的阅读</h2>
+                  <p>最近阅读过的绘本记录</p>
+                </div>
+                <div v-if="!readingHistory.length" class="empty-hint">还没有阅读记录，可以先从书架选一本绘本开始阅读。</div>
+                <ul v-else class="history-list">
+                  <li v-for="item in readingHistory" :key="item.bookId" class="history-item">
+                    <div class="history-main">
+                      <span class="history-title">{{ item.title }}</span>
+                      <span class="history-meta">最近阅读：{{ formatRecordTime(item.lastReadAt) }}</span>
+                    </div>
+                    <button type="button" class="nav-btn primary small" @click="continueBook(item)">继续阅读</button>
+                  </li>
+                </ul>
+                <button type="button" class="nav-btn back-btn" @click="goLibraryHome">返回书架</button>
+              </div>
+            </div>
+
+            <!-- 设备连接：操作指南与连接状态 -->
+            <div v-else-if="readingStatus === 'LIBRARY' && childView === 'DEVICE'" class="layout-full-width" key="device">
+              <div class="library-container device-connect-page">
+                <div class="library-header">
+                  <h2>设备连接</h2>
+                  <p>请按以下步骤完成设备佩戴与连接</p>
+                </div>
+                <div class="device-steps">
+                  <div class="step">
+                    <span class="step-num">1</span>
+                    <div class="step-body">
+                      <h4>佩戴 NIRS 头戴设备</h4>
+                      <p>探头紧贴头皮，松紧适中，确保儿童佩戴舒适。</p>
+                    </div>
+                  </div>
+                  <div class="step">
+                    <span class="step-num">2</span>
+                    <div class="step-body">
+                      <h4>启动数据采集软件</h4>
+                      <p>在采集端选择当前被试并开始推流。</p>
+                    </div>
+                  </div>
+                  <div class="step">
+                    <span class="step-num">3</span>
+                    <div class="step-body">
+                      <h4>确认连接状态</h4>
+                      <p>
+                        当前状态：
+                        <strong :class="{ 'status-ok': isDeviceConnected, 'status-warn': !isDeviceConnected }">
+                          {{ isDeviceConnected ? '已连接，波形正常' : '未连接，请检查数据端与网络' }}
+                        </strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="nav-btn back-btn" @click="goLibraryHome">返回书架</button>
+              </div>
+            </div>
+
+            <div v-else class="layout-split" key="reader">
+                
+                <div class="left-panel">
+                  
+                  <div v-if="readingStatus === 'IDLE'" class="setup-container">
+                    <div class="setup-card">
+                      <div class="icon-pulse">🎧</div>
+                      <h2>{{ currentBookTitle }}</h2>
+                      <p>请为儿童佩戴设备，系统将自动校准</p>
+                      <div class="signal-status">
+                        <span>信号质量：优</span>
+                        <div class="signal-bars"><i></i><i></i><i></i></div>
+                      </div>
+                      <button class="btn-start" @click="startReading" :disabled="isStarting">
+                        {{ isStarting ? '系统启动中...' : '🚀 开始同步记录' }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-else class="reader-container" :style="adaptiveStyle" ref="readerRef">
+                    <div class="paper-sheet">
+                      <div class="content-flow">
+                        <h3 class="chapter-title">{{ currentChapter.title }}</h3>
+                        <p v-for="(para, idx) in currentChapter.content" :key="idx">
+                          {{ para }}
+                        </p>
+                      </div>
+                      
+                      <div class="touch-zone prev" @click="prevPage" title="上一页"></div>
+                      <div class="touch-zone next" @click="nextPage" title="下一页"></div>
+
+                      <div class="page-number">
+                        {{ currentVisualPage + 1 }} / {{ totalVisualPages }}
+                      </div>
+                    </div>
+
+                    <div v-if="focusLevel === 'LOW'" class="interaction-tip" @click="handleInteraction">
+                      <span class="mascot">🐰</span>
+                      <span class="text">小朋友，这里有个有趣的问题点我一下！</span>
+                    </div>
+
+                    <!-- 低注意力互动弹窗 -->
+                    <div v-if="showInteractionPanel" class="interaction-modal">
+                      <div class="interaction-card">
+                        <button class="interaction-close" @click="closeInteractionPanel">✕</button>
+                        <div v-if="interactionType === 'ILLUSTRATION'" class="interaction-content">
+                          <div class="illustration-box" @click.stop>
+                            <span class="emoji">🌈</span>
+                            <p>看看这幅插图里有什么？和刚才读到的内容有什么关系呢？</p>
+                          </div>
+                        </div>
+                        <div v-else class="interaction-content">
+                          <p class="question">小问题：刚才故事里出现了哪一个小动物？</p>
+                          <input
+                            v-model="interactionAnswer"
+                            class="answer-input"
+                            placeholder="在这里回答一两句～"
+                          />
+                          <button class="nav-btn primary small" @click="submitInteractionAnswer">完成</button>
+                        </div>
+
+                        <div v-if="showReward" class="reward">
+                          <span class="emoji">🏅</span>
+                          <span>{{ rewardMessage }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 自适应调整反馈提示 -->
+                    <div v-if="showAdaptToast" class="adapt-toast">
+                      {{ adaptMessage }}
+                    </div>
+                  </div>
+                </div>
+
+                <aside class="right-panel">
+                  <div class="control-card">
+                    <button class="btn-stop" @click="stopReading">
+                      <span class="icon">⏹</span> 结束阅读
+                    </button>
+                    <div class="timer">时长: {{ formatTime(totalTime) }}</div>
+                  </div>
+
+                  <div class="monitor-card">
+                    <h4>实时脑血氧 (HbO)</h4>
+                    <div class="chart-wrapper">
+                      <NirsMonitor :latestData="nirsData" :isConnected="isDeviceConnected" />
+                    </div>
+                  </div>
+
+                  <div class="log-card">
+                    <h4>系统日志</h4>
+                    <div class="log-list">
+                      <div v-for="(log, i) in actionLogs" :key="i" class="log-item">{{ log }}</div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+          </transition>
           
-          <div class="left-panel">
-            
-            <div v-if="readingStatus === 'IDLE'" class="setup-container">
-              <div class="setup-card">
-                <div class="icon-pulse">🎧</div>
-                <h2>{{ currentBookTitle }}</h2>
-                <p>请为儿童佩戴设备，系统将自动校准</p>
-                <div class="signal-status">
-                   <span>信号质量：优</span>
-                   <div class="signal-bars"><i></i><i></i><i></i></div>
-                </div>
-                <button class="btn-start" @click="startReading" :disabled="isStarting">
-                  {{ isStarting ? '系统启动中...' : '🚀 开始同步记录' }}
-                </button>
+          <!-- 底部功能按钮，仅在主界面（书架）展示 -->
+          <div v-if="readingStatus === 'LIBRARY'" class="child-bottom-nav">
+            <button class="nav-btn primary" @click="handleQuickStart">开始阅读</button>
+            <button class="nav-btn" @click="openMyReading">我的阅读</button>
+            <button class="nav-btn" @click="openSettings">设置</button>
+          </div>
+
+          <!-- 书籍详情弹层：简单介绍与推荐理由 -->
+          <div v-if="showBookDetail && selectedBook" class="overlay">
+            <div class="sheet">
+              <div class="sheet-header">
+                <h3>{{ selectedBook.title }}</h3>
+                <button class="sheet-close" @click="closeBookDetail">✕</button>
               </div>
-            </div>
-
-            <div v-else class="reader-container" :style="adaptiveStyle" ref="readerRef">
-              <div class="paper-sheet">
-                 <div class="content-flow">
-                    <h3 class="chapter-title">{{ currentChapter.title }}</h3>
-                    <p v-for="(para, idx) in currentChapter.content" :key="idx">
-                      {{ para }}
-                    </p>
-                 </div>
-                 
-                 <div class="touch-zone prev" @click="prevPage" title="上一页"></div>
-                 <div class="touch-zone next" @click="nextPage" title="下一页"></div>
-
-                 <div class="page-number">
-                   {{ currentVisualPage + 1 }} / {{ totalVisualPages }}
-                 </div>
+              <p class="sheet-subtitle">{{ bookIntro(selectedBook) }}</p>
+              <div class="sheet-body">
+                <p>{{ bookRecommend(selectedBook) }}</p>
               </div>
-
-              <div v-if="focusLevel === 'LOW'" class="interaction-tip" @click="handleInteraction">
-                 <span class="mascot">🐰</span>
-                 <span class="text">小朋友，这里有个有趣的问题点我一下！</span>
+              <div class="sheet-footer">
+                <button class="nav-btn primary" @click="startFromDetail">开始阅读</button>
               </div>
             </div>
           </div>
 
-          <aside class="right-panel">
-            <div class="control-card">
-              <button class="btn-stop" @click="stopReading">
-                <span class="icon">⏹</span> 结束阅读
-              </button>
-              <div class="timer">时长: {{ formatTime(totalTime) }}</div>
-            </div>
-
-            <div class="monitor-card">
-              <h4>实时脑血氧 (HbO)</h4>
-              <div class="chart-wrapper">
-                <NirsMonitor :latestData="nirsData" :isConnected="isDeviceConnected" />
+          <!-- 设置弹层 -->
+          <div v-if="showSettings" class="overlay">
+            <div class="sheet">
+              <div class="sheet-header">
+                <h3>阅读设置</h3>
+                <button class="sheet-close" @click="closeSettings">✕</button>
+              </div>
+              <div class="sheet-body">
+                <div class="setting-item">
+                  <span>字体大小</span>
+                  <input type="range" min="16" max="28" v-model.number="settings.fontSize" />
+                  <span>{{ settings.fontSize }}px</span>
+                </div>
+                <div class="setting-item">
+                  <span>音量</span>
+                  <input type="range" min="0" max="100" v-model.number="settings.volume" />
+                  <span>{{ settings.volume }}</span>
+                </div>
+              </div>
+              <div class="sheet-footer">
+                <button class="nav-btn primary" @click="applySettings">保存设置</button>
               </div>
             </div>
+          </div>
 
-            <div class="log-card">
-              <h4>系统日志</h4>
-              <div class="log-list">
-                 <div v-for="(log, i) in actionLogs" :key="i" class="log-item">{{ log }}</div>
-              </div>
-            </div>
-          </aside>
         </div>
-      </transition>
-    </main>
+
+        <ParentApp v-else-if="currentRole === 'PARENT'" :parent-username="currentUsername" />
+        <AdminApp v-else-if="currentRole === 'ADMIN'" />
+      </main>
+    </template>
   </div>
 </template>
 
@@ -130,9 +348,24 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import axios from 'axios';
 import NirsMonitor from './components/NirsMonitor.vue';
+import ParentApp from './components/ParentApp.vue';
+import AdminApp from './components/AdminApp.vue';
 
 // --- 类型与状态 ---
 type Status = 'LIBRARY' | 'IDLE' | 'ACTIVE' | 'FINISHED';
+type UserRole = 'CHILD' | 'PARENT' | 'ADMIN';
+type InteractionType = 'ILLUSTRATION' | 'QA';
+type ChildView = 'LIBRARY' | 'MY_READING' | 'DEVICE';
+
+const isLoggedIn = ref(false);
+const currentRole = ref<UserRole | null>(null);
+const currentUsername = ref('');
+const childView = ref<ChildView>('LIBRARY');
+const loginForm = ref({
+  username: '',
+  password: ''
+});
+
 const readingStatus = ref<Status>('LIBRARY');
 const bookList = ref<any[]>([]);
 const isLoadingBooks = ref(false);
@@ -142,8 +375,9 @@ const currentBookData = ref<any>(null);
 // 信号与设备
 const focusLevel = ref('NORMAL');
 const focusText: Record<string, string> = { 'LOW': '走神', 'NORMAL': '良好', 'HIGH': '专注' };
-const isDeviceConnected = ref(false);
-const nirsData = ref(null);
+// 现阶段默认设备已连接，仅做设备连接界面展示
+const isDeviceConnected = ref(true);
+const nirsData = ref<any | null>(null);
 const isStarting = ref(false);
 const currentSessionId = ref<number | null>(null);
 const actionLogs = ref<string[]>([]);
@@ -159,7 +393,64 @@ const readerRef = ref<HTMLElement | null>(null);
 const pageWidth = ref(0);
 const columnGap = 160;
 
+// 儿童端主界面扩展状态
+const lastBookId = ref<number | null>(null);
+const selectedBook = ref<any | null>(null);
+const showBookDetail = ref(false);
+
+const showSettings = ref(false);
+const readingHistory = ref<{ bookId: string | number; title: string; lastReadAt: string }[]>([]);
+const settings = ref({
+  fontSize: 20,
+  volume: 70
+});
+const bgNoiseRef = ref<HTMLAudioElement | null>(null);
+
+// 生理数值展示
+const currentHbO = computed(() => {
+  if (!nirsData.value || !nirsData.value.raw_data) return null;
+  return nirsData.value.raw_data.hbo as number;
+});
+
+// 低注意力互动与奖励
+const showInteractionPanel = ref(false);
+const interactionType = ref<InteractionType>('QA');
+const interactionAnswer = ref('');
+const showReward = ref(false);
+const rewardMessage = ref('');
+
+// 自适应提示
+const showAdaptToast = ref(false);
+const adaptMessage = ref('');
+let adaptTimer: any = null;
+
 // --- 核心逻辑 ---
+
+// 登录逻辑（后续可接入后端）
+const handleLogin = () => {
+  const username = loginForm.value.username.trim();
+  const password = loginForm.value.password.trim();
+
+  if (!username || !password) {
+    alert("请输入账号和密码");
+    return;
+  }
+
+  // 示例：本地账号密码，后续可改成调用后端接口
+  if (username === 'child' && password === '123456') {
+    currentRole.value = 'CHILD';
+  } else if (username === 'parent' && password === '123456') {
+    currentRole.value = 'PARENT';
+  } else if (username === 'admin' && password === '123456') {
+    currentRole.value = 'ADMIN';
+  } else {
+    alert("账号或密码错误");
+    return;
+  }
+  currentUsername.value = username;
+  isLoggedIn.value = true;
+  readingStatus.value = 'LIBRARY';
+};
 
 // 1. 获取书架
 const fetchBookList = async () => {
@@ -171,13 +462,35 @@ const fetchBookList = async () => {
 };
 
 const selectBook = async (book: any) => {
+  const entry = { bookId: book.id, title: book.title || '未知', lastReadAt: new Date().toISOString() };
+  const idx = readingHistory.value.findIndex((r) => r.bookId === book.id);
+  if (idx >= 0) readingHistory.value[idx] = entry;
+  else readingHistory.value.unshift(entry);
+
   try {
     const res = await axios.get(`http://localhost:8000/api/v1/books/content/${book.id}`);
     currentBookData.value = res.data.data;
     currentBookTitle.value = res.data.data.title;
     readingStatus.value = 'IDLE'; // 进入准备界面
+    lastBookId.value = book.id;
     connectSocket(); // 提前连接 WS
   } catch(e) { alert("书籍加载失败"); }
+};
+
+// 从书架封面进入“详情”弹层
+const openBookDetail = (book: any) => {
+  selectedBook.value = book;
+  showBookDetail.value = true;
+};
+
+const closeBookDetail = () => {
+  showBookDetail.value = false;
+};
+
+const startFromDetail = () => {
+  if (!selectedBook.value) return;
+  selectBook(selectedBook.value);
+  showBookDetail.value = false;
 };
 
 // 2. 启动同步记录 (Multi-modal Synchronization)
@@ -200,8 +513,9 @@ const startReading = async () => {
   try {
     // A. 告诉后端：创建数据库 Session (行为数据以此 ID 存储)
     const res = await axios.post('http://localhost:8000/api/v1/behavior/start_session', {
-      subject_id: 1, 
-      book_title: currentBookTitle.value
+      subject_id: 1,
+      book_title: currentBookTitle.value,
+      book_id: lastBookId.value ?? undefined
     });
     
     if (res.data.status === 'success') {
@@ -246,6 +560,62 @@ const stopReading = async () => {
   currentSessionId.value = null;
 };
 
+// 通过底部快捷按钮进入最近阅读
+const handleQuickStart = () => {
+  if (lastBookId.value) {
+    const target = bookList.value.find((b: any) => b.id === lastBookId.value);
+    if (target) {
+      selectBook(target);
+      return;
+    }
+  }
+  alert('还没有最近阅读记录，请先选择一本绘本');
+};
+
+// 设置 & 我的阅读
+const openSettings = () => { showSettings.value = true; };
+const closeSettings = () => { showSettings.value = false; };
+const applySettings = () => { showSettings.value = false; };
+
+const openMyReading = async () => {
+  childView.value = 'MY_READING';
+  try {
+    const res = await axios.get('http://localhost:8000/api/v1/reading/history', { params: { subject_id: 1 } });
+    if (res.data?.data) readingHistory.value = res.data.data.map((r: { bookId: string; title: string; lastReadAt: string }) => ({
+      bookId: r.bookId,
+      title: r.title,
+      lastReadAt: r.lastReadAt
+    }));
+  } catch (_) {}
+};
+const openDeviceConnect = () => { childView.value = 'DEVICE'; };
+const goLibraryHome = () => { childView.value = 'LIBRARY'; };
+
+const formatRecordTime = (iso: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+const continueBook = (item: { bookId: string | number; title: string }) => {
+  const book = bookList.value.find((b: any) => b.id === item.bookId);
+  if (book) selectBook(book);
+};
+
+const bookIntro = (book: any) => book?.description || '适读年龄 3～8 岁，图文并茂，支持互动阅读。';
+const bookRecommend = (book: any) => book?.recommendReason || '推荐理由：适合培养专注力与阅读兴趣，可与脑血氧监测配合使用。';
+
+// 退出登录
+const logout = () => {
+  if (readingStatus.value !== 'LIBRARY') {
+    stopReading();
+  }
+  isLoggedIn.value = false;
+  currentRole.value = null;
+  currentUsername.value = '';
+  loginForm.value.username = '';
+  loginForm.value.password = '';
+};
+
 // 3. 阅读器逻辑 (CSS Columns + Transform)
 const currentChapter = computed(() => {
   if (!currentBookData.value) return { title: '', content: [] };
@@ -254,9 +624,11 @@ const currentChapter = computed(() => {
 
 const adaptiveStyle = computed(() => {
   const transformX = currentVisualPage.value * (pageWidth.value + columnGap);
+  const baseFont = settings.value.fontSize || 20;
+
   if (focusLevel.value === 'LOW') {
     return { 
-      '--font-size': '26px', 
+      '--font-size': `${baseFont + 6}px`, 
       '--line-height': '2.0', 
       '--bg-color': '#fffbf0',
       '--transform-x': `-${transformX}px`,
@@ -264,7 +636,7 @@ const adaptiveStyle = computed(() => {
     };
   }
   return { 
-    '--font-size': '20px', 
+    '--font-size': `${baseFont}px`, 
     '--line-height': '1.8', 
     '--bg-color': '#ffffff',
     '--transform-x': `-${transformX}px`,
@@ -272,11 +644,38 @@ const adaptiveStyle = computed(() => {
   };
 });
 
-// 当样式改变时，重新计算总页数，防止溢出
-watch(focusLevel, () => { 
+// 自适应反馈提示
+const showAdaptiveFeedback = (level: string) => {
+  if (readingStatus.value !== 'ACTIVE') return;
+
+  let msg = '';
+  if (level === 'LOW') {
+    msg = '字体变大啦，宝贝继续加油～';
+  } else if (level === 'HIGH') {
+    msg = '你很专注，系统为你保持当前设置';
+  } else {
+    msg = '系统已为你调整到舒适模式';
+  }
+
+  adaptMessage.value = msg;
+  showAdaptToast.value = true;
+  if (adaptTimer) clearTimeout(adaptTimer);
+  adaptTimer = setTimeout(() => {
+    showAdaptToast.value = false;
+  }, 3000);
+};
+
+// 当样式 / 注意力改变时，重新计算总页数，防止溢出，并给出提示
+watch(focusLevel, (val) => { 
+  showAdaptiveFeedback(val);
   setTimeout(() => {
     calculatePages();
   }, 300); 
+});
+
+// 音量同步到背景白噪音（后端可提供白噪音音源 URL）
+watch(() => settings.value.volume, (v) => {
+  if (bgNoiseRef.value) bgNoiseRef.value.volume = (v ?? 0) / 100;
 });
 
 const calculatePages = () => {
@@ -364,13 +763,38 @@ const logBehavior = (type: string, val: string) => {
     });
   }
 };
-const handleInteraction = () => { logBehavior("INTERACTION", "Clicked Tip"); alert("记录成功"); };
+const handleInteraction = () => { 
+  logBehavior("INTERACTION", "Open Panel");
+  interactionType.value = Math.random() > 0.5 ? 'ILLUSTRATION' : 'QA';
+  interactionAnswer.value = '';
+  showReward.value = false;
+  showInteractionPanel.value = true;
+};
+
+const submitInteractionAnswer = () => {
+  logBehavior('INTERACTION_ANSWER', interactionAnswer.value || 'EMPTY');
+  rewardMessage.value = '获得一朵小红花 🌸';
+  showReward.value = true;
+  setTimeout(() => {
+    showInteractionPanel.value = false;
+    showReward.value = false;
+  }, 2000);
+};
+
+const closeInteractionPanel = () => {
+  showInteractionPanel.value = false;
+};
 const backToLibrary = () => { stopReading(); };
 const startTimer = () => { timerInterval = setInterval(() => { totalTime.value = Math.floor((Date.now() - sessionStartTime.value)/1000); }, 1000); };
 const stopTimer = () => clearInterval(timerInterval);
 const formatTime = (s: number) => { const m = Math.floor(s/60); const sec = s%60; return `${m}:${sec.toString().padStart(2,'0')}`; };
 
-onMounted(() => fetchBookList());
+onMounted(() => {
+  fetchBookList();
+  nextTick(() => {
+    if (bgNoiseRef.value) bgNoiseRef.value.volume = (settings.value.volume ?? 70) / 100;
+  });
+});
 onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resize', calculatePages); });
 </script>
 
@@ -379,12 +803,111 @@ onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resiz
 .app-container {
   height: 100vh; display: flex; flex-direction: column; background: #f5f7fa; font-family: 'PingFang SC', sans-serif;
 }
+.app-container > audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 登录页样式 */
+.login-page {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+.login-card {
+  width: 420px;
+  padding: 40px 36px 32px;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+}
+.login-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+  color: #222;
+}
+.login-subtitle {
+  margin: 8px 0 24px;
+  font-size: 14px;
+  text-align: center;
+  color: #888;
+}
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.form-item label {
+  font-size: 14px;
+  color: #555;
+}
+.form-item input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d9d9d9;
+  outline: none;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.form-item input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+.btn-login {
+  margin-top: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.45);
+  transition: all 0.2s;
+}
+.btn-login:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(102, 126, 234, 0.55);
+}
+.login-tips {
+  margin-top: 16px;
+  font-size: 12px;
+  color: #999;
+  line-height: 1.6;
+}
+.login-tips p {
+  margin: 0;
+}
 
 .navbar {
   height: 60px; background: white; padding: 0 30px; display: flex; justify-content: space-between; align-items: center;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05); z-index: 100; flex-shrink: 0;
 }
 .brand { font-size: 20px; font-weight: bold; color: #333; }
+.user-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.user-role {
+  color: #555;
+}
 .status-panel { display: flex; align-items: center; gap: 20px; font-size: 14px; }
 .btn-text { background: none; border: 1px solid #ddd; padding: 5px 12px; border-radius: 4px; cursor: pointer; }
 .indicator { display: flex; align-items: center; gap: 6px; }
@@ -441,6 +964,57 @@ onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resiz
   font-size: 18px; 
   opacity: 0.95;
   font-weight: 300;
+}
+.device-summary {
+  margin: 0 auto 30px;
+  padding: 12px 18px;
+  max-width: 760px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #fff;
+  font-size: 14px;
+}
+.device-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.device-status .text {
+  font-weight: 500;
+}
+.link-btn {
+  margin-left: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+}
+.link-btn-subtle {
+  margin-left: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  text-decoration: underline;
+}
+.hbo-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hbo-status .label {
+  opacity: 0.9;
+}
+.hbo-status .value {
+  font-weight: 600;
+}
+.hbo-status .placeholder {
+  opacity: 0.7;
 }
 .loading {
   display: flex; 
@@ -552,6 +1126,138 @@ onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resiz
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
+/* 儿童端底部功能栏 */
+.child-bottom-nav {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+}
+.nav-btn {
+  min-width: 110px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: none;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+.nav-btn.primary {
+  background: linear-gradient(135deg, #ff9a9e, #fecf99);
+  color: #6b1b1b;
+}
+.nav-btn.small {
+  min-width: 80px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+
+/* 我的阅读页 */
+.my-reading-page {
+  align-items: flex-start;
+}
+.empty-hint {
+  margin-top: 12px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.95);
+}
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.history-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.history-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+.history-meta {
+  font-size: 12px;
+  color: #6b7280;
+}
+.back-btn {
+  margin-top: 20px;
+}
+
+/* 设备连接页 */
+.device-connect-page {
+  align-items: flex-start;
+}
+.device-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 560px;
+  margin-inline: auto;
+}
+.device-connect-page .step {
+  display: flex;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.step-body h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: #111827;
+}
+.step-body p {
+  margin: 0;
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+.status-ok {
+  color: #16a34a;
+}
+.status-warn {
+  color: #dc2626;
+}
+.device-connect-page .back-btn {
+  margin-top: 24px;
+}
+
 /* === 布局 B: 分栏模式 (Reader + Sidebar) === */
 .layout-split {
   display: flex; width: 100%; height: 100%;
@@ -642,6 +1348,144 @@ onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resiz
   padding: 15px 25px; border-radius: 30px; cursor: pointer; animation: pop 0.5s; z-index: 20;
 }
 @keyframes pop { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* 互动弹窗与自适应提示 */
+.interaction-modal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 30;
+}
+.interaction-card {
+  width: 360px;
+  max-width: 90%;
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px 18px 14px;
+  position: relative;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+}
+.interaction-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.interaction-content {
+  margin-top: 10px;
+}
+.illustration-box {
+  border-radius: 12px;
+  padding: 18px;
+  background: linear-gradient(135deg, #ffecd2, #fcb69f);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.illustration-box .emoji {
+  font-size: 32px;
+}
+.question {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #333;
+}
+.answer-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d9d9d9;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.reward {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #faad14;
+}
+.reward .emoji {
+  font-size: 18px;
+}
+.adapt-toast {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  z-index: 40;
+}
+
+/* 通用弹层样式：设置、书籍详情、我的阅读 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 120;
+}
+.sheet {
+  width: 100%;
+  max-width: 500px;
+  background: #fff;
+  border-radius: 18px 18px 0 0;
+  padding: 16px 18px 18px;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
+}
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.sheet-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.sheet-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.sheet-subtitle {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #666;
+}
+.sheet-body {
+  font-size: 14px;
+  color: #444;
+}
+.sheet-footer {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+.setting-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.setting-item span:first-child {
+  min-width: 72px;
+}
+.setting-item input[type="range"] {
+  flex: 1;
+}
 
 /* === 过渡动画 === */
 .fade-enter-active, .fade-leave-active {

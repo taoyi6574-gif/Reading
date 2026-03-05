@@ -71,10 +71,10 @@ def process_and_import(file_path):
             print(f"ℹ️ 被试已存在: {subject.subject_code}")
 
         # --- 2. 创建阅读会话 (ReadingSession) ---
-        # 对应你的“阅读报告”容器
         session = models.ReadingSession(
             subject_id=subject.id,
-            book_title=filename,  # 暂时用文件名作为书名，实际系统中可由前端传入
+            book_title=filename,
+            book_id=filename,  # 与 reading_sessions.book_id 一致
             start_time=meta['start_time']
         )
         db.add(session)
