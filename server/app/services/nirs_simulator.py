@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from server.app.db import models
 from server.app.db.base import SessionLocal
+from server.app.core.config import settings
 
 #我们需要一个新的服务文件，专门负责读取文件并模拟设备流。
 
@@ -24,7 +25,7 @@ class NirsSyncSimulator:
 
         # 预加载文件 (这里替换为你实际的 .nirs 或 .snirf 文件路径)
         # 建议放在 server/data/ 目录下
-        self.file_path = "data/通用_2024-08-13_20-15-18_00_qecs_男_1980-01-01_-2wavelength.snirf"
+        self.file_path = settings.NIRS_SIM_FILE
         self.load_data()
 
     def load_data(self):

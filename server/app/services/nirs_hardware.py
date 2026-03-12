@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from server.app.db import models
 from server.app.db.base import SessionLocal
 from server.app.services.Rdata import MatlabN  # 导入你的通信模块
+from server.app.core.config import settings
 
 # 设置 MNE 日志级别
 mne.set_log_level('WARNING')
@@ -17,10 +18,10 @@ class NirsHardwareDriver:
         self.current_session_id = None
         self.start_time = None
 
-        # 1. 初始化 Matlab 引擎 (这可能需要几秒钟)
-        print("正在初始化 Matlab 引擎，请稍候...")
-        self.rdata = MatlabN()
-        print("Matlab 引擎初始化完成！")
+        # 注意：Matlab 引擎初始化很慢且可能在未安装时失败，
+        # 因此改为延迟初始化（在 connect_device 时才创建）。
+        self.rdata = None
+        self._is_connected = False
 
         # 2. 配置 MNE 通道信息 (复用你提供的 channel names)
         # 730nm 和 850nm 的通道定义
@@ -73,15 +74,45 @@ class NirsHardwareDriver:
 
     async def connect_device(self):
         """异步连接设备"""
-        print("正在连接 NIRS 设备 (IP 0.0.0.0)...")
+        if self.rdata is None:
+            print("正在初始化 Matlab 引擎，请稍候...")
+            # 可能抛异常：matlab engine 未安装 / NDI 目录不存在
+            self.rdata = await asyncio.to_thread(MatlabN)
+            print("Matlab 引擎初始化完成！")
+
+        print(f"正在连接 NIRS 设备 (IP {settings.NDI_IP}, PORT {settings.NDI_PORT})...")
         # 由于 Matlab 调用是阻塞的，我们把它放到线程池里跑，防止卡死服务器
         res = await asyncio.to_thread(self.rdata.connect)
-        if res == 1:
+        self._is_connected = res == 1
+        if self._is_connected:
             print("✅ 设备连接成功！")
-            return True
         else:
             print("❌ 设备连接失败")
-            return False
+        return self._is_connected
+
+    async def disconnect_device(self) -> bool:
+        """断开设备连接。"""
+        if self.rdata is None:
+            self._is_connected = False
+            return True
+        try:
+            await asyncio.to_thread(self.rdata.disconnect)
+        except Exception:
+            pass
+        self._is_connected = False
+        print("设备已断开连接")
+        return True
+
+    def get_device_status(self) -> dict:
+        """返回设备连接状态。"""
+        connected = False
+        if self.rdata is not None:
+            try:
+                connected = self.rdata.is_connected()
+            except Exception:
+                pass
+        self._is_connected = connected
+        return {"connected": connected, "mode": "hardware"}
 
     async def start_streaming(self, session_id: int):
         """
@@ -214,5 +245,12 @@ class NirsHardwareDriver:
         self.is_running = False
 
 
-# 全局单例
-nirs_driver = NirsHardwareDriver()
+_nirs_driver_singleton = None
+
+
+def get_nirs_hardware_driver() -> NirsHardwareDriver:
+    """按需创建硬件驱动单例，避免 import 时启动 Matlab 引擎导致服务启动失败。"""
+    global _nirs_driver_singleton
+    if _nirs_driver_singleton is None:
+        _nirs_driver_singleton = NirsHardwareDriver()
+    return _nirs_driver_singleton

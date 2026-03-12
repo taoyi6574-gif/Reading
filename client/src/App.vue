@@ -147,13 +147,60 @@
               </div>
             </div>
 
-            <!-- 设备连接：操作指南与连接状态 -->
+            <!-- 设备连接：操作指南、连接/断开/状态 -->
             <div v-else-if="readingStatus === 'LIBRARY' && childView === 'DEVICE'" class="layout-full-width" key="device">
               <div class="library-container device-connect-page">
                 <div class="library-header">
                   <h2>设备连接</h2>
                   <p>请按以下步骤完成设备佩戴与连接</p>
                 </div>
+
+                <div class="device-control-card">
+                  <div class="device-status-row">
+                    <span class="dot" :class="{ active: isDeviceConnected }"></span>
+                    <span class="status-label">{{ isDeviceConnected ? '已连接' : '未连接' }}</span>
+                    <span class="mode-tag">{{ deviceMode === 'sim' ? '模拟模式' : '硬件模式' }}</span>
+                  </div>
+                  <div class="device-mode-row">
+                    <span class="mode-label">数据源模式</span>
+                    <select v-model="deviceMode" class="mode-select" :disabled="deviceSwitching">
+                      <option value="sim">模拟模式</option>
+                      <option value="hardware">硬件模式（NDI/Matlab）</option>
+                    </select>
+                    <button type="button" class="btn-device secondary" :disabled="deviceSwitching" @click="deviceApplyMode">
+                      {{ deviceSwitching ? '切换中...' : '应用' }}
+                    </button>
+                  </div>
+                  <p v-if="deviceMessage" class="device-message">{{ deviceMessage }}</p>
+                  <div class="device-actions">
+                    <button
+                      type="button"
+                      class="btn-device primary"
+                      :disabled="deviceConnecting"
+                      @click="deviceConnect"
+                    >
+                      {{ deviceConnecting ? '连接中...' : '连接设备' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-device"
+                      :disabled="deviceDisconnecting"
+                      @click="deviceDisconnect"
+                    >
+                      {{ deviceDisconnecting ? '断开中...' : '断开设备' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-device secondary"
+                      :disabled="deviceLoadingStatus"
+                      @click="deviceFetchStatus"
+                    >
+                      {{ deviceLoadingStatus ? '查询中...' : '刷新状态' }}
+                    </button>
+                  </div>
+                  <p v-if="deviceError" class="device-error">{{ deviceError }}</p>
+                </div>
+
                 <div class="device-steps">
                   <div class="step">
                     <span class="step-num">1</span>
@@ -176,7 +223,7 @@
                       <p>
                         当前状态：
                         <strong :class="{ 'status-ok': isDeviceConnected, 'status-warn': !isDeviceConnected }">
-                          {{ isDeviceConnected ? '已连接，波形正常' : '未连接，请检查数据端与网络' }}
+                          {{ isDeviceConnected ? '已连接，可开始采集' : '未连接，请点击上方「连接设备」' }}
                         </strong>
                       </p>
                     </div>
@@ -375,8 +422,17 @@ const currentBookData = ref<any>(null);
 // 信号与设备
 const focusLevel = ref('NORMAL');
 const focusText: Record<string, string> = { 'LOW': '走神', 'NORMAL': '良好', 'HIGH': '专注' };
-// 现阶段默认设备已连接，仅做设备连接界面展示
-const isDeviceConnected = ref(true);
+const isDeviceConnected = ref(false);
+// 设备连接页：模式、状态、按钮 loading
+const deviceMode = ref<'sim' | 'hardware'>('sim');
+const deviceMessage = ref('');
+const deviceError = ref('');
+const deviceConnecting = ref(false);
+const deviceDisconnecting = ref(false);
+const deviceLoadingStatus = ref(false);
+const deviceSwitching = ref(false);
+
+const API_BASE = 'http://localhost:8000/api/v1';
 const nirsData = ref<any | null>(null);
 const isStarting = ref(false);
 const currentSessionId = ref<number | null>(null);
@@ -450,6 +506,9 @@ const handleLogin = () => {
   currentUsername.value = username;
   isLoggedIn.value = true;
   readingStatus.value = 'LIBRARY';
+  if (currentRole.value === 'CHILD') {
+    deviceFetchStatus();
+  }
 };
 
 // 1. 获取书架
@@ -588,7 +647,84 @@ const openMyReading = async () => {
     }));
   } catch (_) {}
 };
-const openDeviceConnect = () => { childView.value = 'DEVICE'; };
+const openDeviceConnect = () => {
+  childView.value = 'DEVICE';
+  deviceError.value = '';
+  deviceFetchStatus();
+};
+
+async function deviceFetchStatus() {
+  deviceLoadingStatus.value = true;
+  deviceError.value = '';
+  try {
+    const res = await axios.get(`${API_BASE}/device/status`);
+    const d = res.data;
+    isDeviceConnected.value = d?.connected ?? false;
+    deviceMode.value = (d?.mode ?? 'sim') as 'sim' | 'hardware';
+    deviceMessage.value = d?.message ?? '';
+  } catch (e: any) {
+    deviceError.value = e?.response?.data?.message ?? e?.message ?? '查询状态失败';
+  } finally {
+    deviceLoadingStatus.value = false;
+  }
+}
+
+async function deviceConnect() {
+  // 硬件连接前，确保模式已经切到 hardware
+  if (deviceMode.value !== 'hardware') {
+    deviceError.value = '当前为模拟模式，请先切换到硬件模式再连接设备。';
+    return;
+  }
+  deviceConnecting.value = true;
+  deviceError.value = '';
+  try {
+    const res = await axios.post(`${API_BASE}/device/connect`);
+    const d = res.data;
+    isDeviceConnected.value = d?.ok && (d?.connected ?? false);
+    deviceMode.value = (d?.mode ?? deviceMode.value) as 'sim' | 'hardware';
+    deviceMessage.value = d?.message ?? '';
+    if (!d?.ok) deviceError.value = d?.message ?? '连接失败';
+  } catch (e: any) {
+    deviceError.value = e?.response?.data?.message ?? e?.message ?? '连接请求失败';
+  } finally {
+    deviceConnecting.value = false;
+  }
+}
+
+async function deviceApplyMode() {
+  deviceSwitching.value = true;
+  deviceError.value = '';
+  try {
+    const res = await axios.post(`${API_BASE}/device/mode`, { mode: deviceMode.value });
+    const d = res.data;
+    if (!d?.ok) {
+      deviceError.value = d?.message ?? '切换失败';
+      return;
+    }
+    deviceMessage.value = d?.message ?? '';
+    await deviceFetchStatus();
+  } catch (e: any) {
+    deviceError.value = e?.response?.data?.message ?? e?.message ?? '切换请求失败';
+  } finally {
+    deviceSwitching.value = false;
+  }
+}
+
+async function deviceDisconnect() {
+  deviceDisconnecting.value = true;
+  deviceError.value = '';
+  try {
+    const res = await axios.post(`${API_BASE}/device/disconnect`);
+    const d = res.data;
+    isDeviceConnected.value = false;
+    deviceMode.value = (d?.mode ?? deviceMode.value) as 'sim' | 'hardware';
+    deviceMessage.value = d?.message ?? '已断开';
+  } catch (e: any) {
+    deviceError.value = e?.response?.data?.message ?? e?.message ?? '断开请求失败';
+  } finally {
+    deviceDisconnecting.value = false;
+  }
+}
 const goLibraryHome = () => { childView.value = 'LIBRARY'; };
 
 const formatRecordTime = (iso: string) => {
@@ -1207,6 +1343,102 @@ onUnmounted(() => { if(socket) socket.close(); window.removeEventListener('resiz
 /* 设备连接页 */
 .device-connect-page {
   align-items: flex-start;
+}
+.device-control-card {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto 24px;
+  padding: 20px 24px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+.device-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.device-status-row .dot {
+  width: 12px;
+  height: 12px;
+}
+.device-status-row .status-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+.device-mode-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.mode-label {
+  font-size: 13px;
+  color: #4b5563;
+  min-width: 72px;
+}
+.mode-select {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 13px;
+}
+.mode-tag {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: rgba(255, 255, 255, 0.95);
+}
+.device-message {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+.device-error {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #dc2626;
+}
+.device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.btn-device {
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-device:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-device.primary {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border: none;
+  color: #fff;
+}
+.btn-device.primary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+.btn-device.secondary {
+  background: transparent;
+  border-color: #667eea;
+  color: #667eea;
 }
 .device-steps {
   display: flex;

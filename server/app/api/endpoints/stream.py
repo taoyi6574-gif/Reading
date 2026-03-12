@@ -1,6 +1,6 @@
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from server.app.services.nirs_simulator import nirs_manager
+from server.app.services.nirs_manager import nirs_manager
 
 router = APIRouter()
 
